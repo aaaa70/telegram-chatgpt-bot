@@ -1,18 +1,25 @@
-# Telegram ChatGPT Bot 🤖
+# Telegram ChatGPT Bot (Multilingual, GPT-5)
 
-ربات تلگرام متصل به ChatGPT (OpenAI)
+## Deploy on Render
 
-## راه‌اندازی روی Railway
+1. Create a new Web Service on [Render.com](https://render.com)
+2. Connect your GitHub repo or upload manually
+3. Set environment variables:
+   - TELEGRAM_TOKEN = your_telegram_bot_token
+   - OPENAI_API_KEY = your_openai_api_key
+   - MODEL = gpt-5
+4. Build command:
+   ```bash
+   pip install -r requirements.txt
+   ```
+   Start command:
+   ```bash
+   gunicorn bot:app --bind 0.0.0.0:$PORT
+   ```
 
-1. ریپازیتوری را در GitHub آپلود کنید.
-2. در سایت [Railway.app](https://railway.app) ثبت‌نام کنید.
-3. پروژه جدید بسازید و به GitHub وصل کنید.
-4. در بخش Variables دو مقدار اضافه کنید:
-
+After deployment, set the webhook:
 ```
-TELEGRAM_TOKEN = توکن_از_BotFather
-OPENAI_API_KEY = کلید_API_OpenAI
+https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=https://your-app.onrender.com/webhook
 ```
 
-5. Deploy بزنید ✅  
-6. در تلگرام، `/start` بفرستید و لذت ببرید!
+Now your bot is multilingual and replies in the same language as the user!
