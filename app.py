@@ -33,8 +33,8 @@ def ask_openrouter(prompt):
         "Content-Type": "application/json"
     }
     system_prompt = (
-        "You are a helpful multilingual assistant. Detect user's language and reply naturally."
-        " Prefer Persian when input is Persian."
+        "You are a helpful multilingual assistant. Detect user's language and reply naturally. "
+        "Prefer Persian when input is Persian."
     )
     data = {
         "model": MODEL_ID,
@@ -171,16 +171,18 @@ def webhook():
             if any("\u0600" <= ch <= "\u06FF" for ch in user_text):
                 lang = "fa"
             elif any(ch.isalpha() and ch.lower() in 'abcdefghijklmnopqrstuvwxyz' for ch in user_text):
-                lang = "en"
-            else:
-                lang = "en"
+                # simple detection between en and tr: if contains 'ğ' 'ş' etc maybe tr
+                if any(c in user_text.lower() for c in 'çğıöşü'):
+                    lang = 'tr'
+                else:
+                    lang = 'en'
             audio_io = tts_generate(reply, lang)
             if audio_io:
                 send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             return jsonify({"ok": True})
 
         if "voice" in msg or "audio" in msg:
-            file_info = msg.get("voice") or msg.get("audio")
+            file_info = msg.get("voice") or msg.get("audio") 
             file_id = file_info.get("file_id")
             gf = requests.get(f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/getFile?file_id={file_id}", timeout=15).json()
             file_path = gf.get('result', {}).get('file_path')
@@ -192,7 +194,7 @@ def webhook():
             if transcription:
                 reply = ask_openrouter(transcription)
                 send_message(chat_id, reply, reply_to_message_id=reply_to)
-                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in transcription) else "en")
+                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in transcription) else ( 'tr' if any(c in transcription.lower() for c in 'çğıöşü') else 'en'))
                 if audio_io:
                     send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             else:
@@ -213,7 +215,7 @@ def webhook():
             if caption:
                 reply = ask_openrouter(caption)
                 send_message(chat_id, reply, reply_to_message_id=reply_to)
-                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in caption) else "en")
+                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in caption) else ('tr' if any(c in caption.lower() for c in 'çğıöşü') else 'en'))
                 if audio_io:
                     send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             else:

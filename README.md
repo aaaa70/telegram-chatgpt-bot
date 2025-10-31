@@ -1,35 +1,23 @@
-# Telegram Multilingual Voice Bot (OpenRouter Gemma) - Ready for Render
+# Telegram Multilingual Voice Bot (OpenRouter Gemma) - Docker-ready for Render
 
-## Features
-- Multilingual chat using OpenRouter model `google/gemma-7b-it`
-- Default replies in Persian when input is Persian
-- Voice message transcription (optional) via Hugging Face Inference API (set HF_API_KEY)
-- Photo captioning (optional) via Hugging Face Inference API (set HF_API_KEY)
-- TTS replies using gTTS with a slight pitch-down to resemble a male voice
-- Deployable on Render
+## What's inside
+- app.py (Flask webhook handler)
+- requirements.txt
+- Dockerfile (installs ffmpeg)
+- README.md
 
-## Files
-- `app.py` - main Flask app and Telegram webhook handler
-- `requirements.txt` - Python dependencies
-- `README.md` - this file
-
-## Setup (Render)
-1. Create a GitHub repo and push these files, or upload the ZIP to Render.
-2. In Render, create a **Web Service** and connect your repo.
-3. Build command:
-   ```bash
-   pip install -r requirements.txt
-   ```
-4. Start command:
-   ```bash
-   gunicorn app:app --bind 0.0.0.0:$PORT
-   ```
-5. Environment Variables (in Render -> Service -> Settings -> Environment):
-   - `OPENROUTER_API_KEY` = your OpenRouter key (sk-or-...)
-   - `TELEGRAM_TOKEN` = your Telegram bot token (from BotFather)
-   - Optional:
-     - `HF_API_KEY` = Hugging Face API key (to enable voice transcription & image captioning)
+## Deploy on Render (Docker)
+1. Push repository to GitHub.
+2. On Render, create a **New Web Service** -> Connect GitHub repo.
+3. Choose **Docker** as the environment.
+4. Add Environment Variables in Render -> Settings:
+   - OPENROUTER_API_KEY = sk-or-...
+   - TELEGRAM_TOKEN = bot...
+   - HF_API_KEY = hf_... (optional)
+5. Deploy. After successful build, set Telegram webhook:
+   https://api.telegram.org/bot<TELEGRAM_TOKEN>/setWebhook?url=https://<your-render-url>/webhook
 
 ## Notes
-- pydub requires `ffmpeg` on the system to process audio. On Render you may need to enable global build scripts or use a custom Docker image with ffmpeg installed.
-- gTTS uses Google Translate TTS; network access is required.
+- pydub requires ffmpeg; Dockerfile installs it.
+- gTTS requires network access to Google's TTS backend.
+- If you want higher-quality TTS or offline TTS, consider ElevenLabs or local TTS engines and adjust code.
