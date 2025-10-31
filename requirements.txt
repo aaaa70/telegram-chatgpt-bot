@@ -1,6 +1,4 @@
 Flask==3.0.3
-pyTelegramBotAPI==4.16.1
-openai==1.30.1
-gTTS==2.5.1
 requests==2.32.3
+gTTS==2.5.1
 gunicorn==23.0.0
