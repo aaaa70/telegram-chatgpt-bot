@@ -1,21 +1,28 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 from pathlib import Path
+from gtts import gTTS
+from pydub import AudioSegment
+import io
+import tempfile
+import logging
 
+logging.basicConfig(level=logging.INFO)
 app = Flask(__name__)
 
-# Environment variables
+# Environment variables (set these in Render)
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY")
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
-HF_API_KEY = os.environ.get("HF_API_KEY")  # Optional: Hugging Face API key for speech/image processing
+HF_API_KEY = os.environ.get("HF_API_KEY")  # optional for transcription & image captioning
 
 TELEGRAM_API = "https://api.telegram.org"
 TELEGRAM_FILE_API = "https://api.telegram.org/file/bot"
 
-# Ensure data directory exists
 DATA_DIR = Path("/tmp/telegram_bot_data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+MODEL_ID = "google/gemma-7b-it"
 
 def ask_openrouter(prompt):
     if not OPENROUTER_API_KEY:
@@ -26,12 +33,11 @@ def ask_openrouter(prompt):
         "Content-Type": "application/json"
     }
     system_prompt = (
-        "You are a multilingual assistant that automatically detects the user's language "
-        "and responds naturally in that same language. If the user's message is Persian, "
-        "prefer to answer in Persian. Keep answers concise and friendly."
+        "You are a helpful multilingual assistant. Detect user's language and reply naturally."
+        " Prefer Persian when input is Persian."
     )
     data = {
-        "model": "meta-llama/Meta-Llama-3-70B-Instruct",
+        "model": MODEL_ID,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt}
@@ -42,12 +48,11 @@ def ask_openrouter(prompt):
     try:
         j = resp.json()
         return j["choices"][0]["message"]["content"]
-    except Exception:
-        return f"⚠️ خطا در ارتباط با OpenRouter: HTTP {resp.status_code} - {resp.text}"
+    except Exception as e:
+        app.logger.error("OpenRouter error: %s %s", getattr(resp, 'status_code', None), getattr(resp, 'text', None))
+        return f"⚠️ خطا در ارتباط با OpenRouter: {e}"
 
 def download_file(file_path):
-    # file_path is the "file_path" returned by getFile
-    # returns local saved path or None
     if not file_path:
         return None
     file_url = f"{TELEGRAM_FILE_API}{TELEGRAM_TOKEN}/{file_path}"
@@ -64,14 +69,8 @@ def download_file(file_path):
         return None
 
 def hf_speech_to_text(local_path):
-    """
-    Optional: If HF API key provided, send audio bytes to a Hugging Face speech-to-text model.
-    This function is optional and best-effort — some models accept ogg/opus, others need wav.
-    If HF_API_KEY is not set, returns None.
-    """
     if not HF_API_KEY:
         return None
-    # Example: use 'openai/whisper-large' or other speech model on Hugging Face inference
     hf_url = "https://api-inference.huggingface.co/models/openai/whisper-large"
     headers = {"Authorization": f"Bearer {HF_API_KEY}"}
     try:
@@ -91,10 +90,6 @@ def hf_speech_to_text(local_path):
         return None
 
 def hf_image_caption(local_path):
-    """
-    Optional: If HF API key provided, send image bytes to a captioning model (e.g., blip).
-    Returns caption text or None.
-    """
     if not HF_API_KEY:
         return None
     hf_url = "https://api-inference.huggingface.co/models/Salesforce/blip-image-captioning-large"
@@ -115,6 +110,37 @@ def hf_image_caption(local_path):
         app.logger.error("hf_image_caption failed: %s", e)
         return None
 
+def tts_generate(text, lang):
+    try:
+        tts = gTTS(text=text, lang=lang)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as tmp:
+            tts.save(tmp.name)
+            tmp_path = tmp.name
+        audio = AudioSegment.from_file(tmp_path, format="mp3")
+        new_sample_rate = int(audio.frame_rate * 0.90)
+        lowered = audio._spawn(audio.raw_data, overrides={"frame_rate": new_sample_rate})
+        lowered = lowered.set_frame_rate(22050)
+        out_io = io.BytesIO()
+        lowered.export(out_io, format="mp3")
+        out_io.seek(0)
+        return out_io
+    except Exception as e:
+        app.logger.error("TTS failed: %s", e)
+        return None
+
+def send_audio(chat_id, audio_bytes_io, reply_to_message_id=None):
+    url = f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/sendAudio"
+    files = {"audio": ("reply.mp3", audio_bytes_io, "audio/mpeg")}
+    data = {"chat_id": chat_id}
+    if reply_to_message_id:
+        data["reply_to_message_id"] = reply_to_message_id
+    try:
+        resp = requests.post(url, data=data, files=files, timeout=30)
+        return resp.ok
+    except Exception as e:
+        app.logger.error("send_audio failed: %s", e)
+        return False
+
 def send_message(chat_id, text, reply_to_message_id=None):
     url = f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
@@ -128,51 +154,57 @@ def send_message(chat_id, text, reply_to_message_id=None):
 @app.route('/webhook', methods=['POST'])
 def webhook():
     data = request.get_json(force=True)
-    app.logger.info("Update received: %s", data and list(data.keys()))
+    app.logger.info("Update received keys: %s", list(data.keys()) if data else None)
     if not data:
         return jsonify({"ok": True})
 
-    # Handle text messages
     if "message" in data:
         msg = data["message"]
         chat_id = msg["chat"]["id"]
         reply_to = msg.get("message_id")
-        # Text
+
         if "text" in msg and msg["text"]:
             user_text = msg["text"]
-            app.logger.info("Text message: %s", user_text[:80])
             reply = ask_openrouter(user_text)
             send_message(chat_id, reply, reply_to_message_id=reply_to)
+            lang = "fa"
+            if any("\u0600" <= ch <= "\u06FF" for ch in user_text):
+                lang = "fa"
+            elif any(ch.isalpha() and ch.lower() in 'abcdefghijklmnopqrstuvwxyz' for ch in user_text):
+                lang = "en"
+            else:
+                lang = "en"
+            audio_io = tts_generate(reply, lang)
+            if audio_io:
+                send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             return jsonify({"ok": True})
 
-        # Voice / Audio
         if "voice" in msg or "audio" in msg:
             file_info = msg.get("voice") or msg.get("audio")
             file_id = file_info.get("file_id")
-            # getFile to obtain file_path
             gf = requests.get(f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/getFile?file_id={file_id}", timeout=15).json()
-            file_path = gf.get("result", {}).get("file_path")
+            file_path = gf.get('result', {}).get('file_path')
             local = download_file(file_path)
             if not local:
                 send_message(chat_id, "⚠️ خطا در دانلود فایل صوتی.")
                 return jsonify({"ok": True})
-            # Try HF transcription if available
             transcription = hf_speech_to_text(local)
             if transcription:
                 reply = ask_openrouter(transcription)
                 send_message(chat_id, reply, reply_to_message_id=reply_to)
+                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in transcription) else "en")
+                if audio_io:
+                    send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             else:
-                send_message(chat_id, "✅ ویس دریافت شد. برای فعال‌سازی تبدیل گفتار به متن، متغیر محیطی HF_API_KEY را با کلید Hugging Face قرار دهید.")
+                send_message(chat_id, "✅ ویس دریافت شد. برای تبدیل خودکار به متن، HF_API_KEY را در متغیرها بگذارید.")
             return jsonify({"ok": True})
 
-        # Photos
         if "photo" in msg:
             photos = msg["photo"]
-            # choose highest resolution
             best = photos[-1]
             file_id = best.get("file_id")
             gf = requests.get(f"{TELEGRAM_API}/bot{TELEGRAM_TOKEN}/getFile?file_id={file_id}", timeout=15).json()
-            file_path = gf.get("result", {}).get("file_path")
+            file_path = gf.get('result', {}).get('file_path')
             local = download_file(file_path)
             if not local:
                 send_message(chat_id, "⚠️ خطا در دانلود تصویر.")
@@ -181,20 +213,22 @@ def webhook():
             if caption:
                 reply = ask_openrouter(caption)
                 send_message(chat_id, reply, reply_to_message_id=reply_to)
+                audio_io = tts_generate(reply, "fa" if any("\u0600" <= ch <= "\u06FF" for ch in caption) else "en")
+                if audio_io:
+                    send_audio(chat_id, audio_io, reply_to_message_id=reply_to)
             else:
-                send_message(chat_id, "✅ عکس دریافت شد. برای فعال‌سازی توضیح‌دهی تصویر، متغیر محیطی HF_API_KEY را با کلید Hugging Face قرار دهید.")
+                send_message(chat_id, "✅ عکس دریافت شد. برای فعال‌سازی توضیح‌دهی تصویر، HF_API_KEY را در متغیرها قرار دهید.")
             return jsonify({"ok": True})
 
-        # Other types
-        send_message(chat_id, "تنها پیام‌های متنی، ویس و عکس پشتیبانی می‌شوند (در حال حاضر).")
+        send_message(chat_id, "تنها متن، ویس و عکس پشتیبانی می‌شود.")
         return jsonify({"ok": True})
 
     return jsonify({"ok": True})
 
 @app.route('/')
 def home():
-    return "🌍 Telegram Multilingual Bot (OpenRouter chat) - running"
+    return "🌍 Telegram Multilingual Bot (Gemma/OpenRouter) - running"
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port)

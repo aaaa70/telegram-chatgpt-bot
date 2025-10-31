@@ -1,11 +1,12 @@
-# Telegram Multilingual Bot (OpenRouter) - Ready for Render
+# Telegram Multilingual Voice Bot (OpenRouter Gemma) - Ready for Render
 
 ## Features
-- Multilingual chat using **OpenRouter** (Llama 3)
-- Default replies in **Persian** when user writes Persian
-- Detects and downloads **voice messages** and **photos**
-- Optional: Speech-to-text and image captioning using **Hugging Face Inference API**
-  (set `HF_API_KEY` environment variable to enable automatic transcription/captioning)
+- Multilingual chat using OpenRouter model `google/gemma-7b-it`
+- Default replies in Persian when input is Persian
+- Voice message transcription (optional) via Hugging Face Inference API (set HF_API_KEY)
+- Photo captioning (optional) via Hugging Face Inference API (set HF_API_KEY)
+- TTS replies using gTTS with a slight pitch-down to resemble a male voice
+- Deployable on Render
 
 ## Files
 - `app.py` - main Flask app and Telegram webhook handler
@@ -16,11 +17,11 @@
 1. Create a GitHub repo and push these files, or upload the ZIP to Render.
 2. In Render, create a **Web Service** and connect your repo.
 3. Build command:
-   ```
+   ```bash
    pip install -r requirements.txt
    ```
 4. Start command:
-   ```
+   ```bash
    gunicorn app:app --bind 0.0.0.0:$PORT
    ```
 5. Environment Variables (in Render -> Service -> Settings -> Environment):
@@ -29,14 +30,6 @@
    - Optional:
      - `HF_API_KEY` = Hugging Face API key (to enable voice transcription & image captioning)
 
-## Webhook
-Set webhook once your service is live:
-```
-https://api.telegram.org/bot<YOUR_TELEGRAM_TOKEN>/setWebhook?url=https://<your-render-url>/webhook
-```
-
-## Notes & Next steps
-- This implementation **always** handles text via OpenRouter.
-- Voice and image processing are optional and use Hugging Face if `HF_API_KEY` is present.
-- If you want automatic, higher-quality transcription (Whisper) or image understanding via other paid APIs, provide corresponding API keys and I can update the code.
-- On Render you may need to ensure `ffmpeg` is available if you plan to convert audio formats.
+## Notes
+- pydub requires `ffmpeg` on the system to process audio. On Render you may need to enable global build scripts or use a custom Docker image with ffmpeg installed.
+- gTTS uses Google Translate TTS; network access is required.
